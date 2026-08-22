@@ -54,3 +54,14 @@ output "eks_cluster_version" {
   description = "Kubernetes version."
   value       = module.eks.cluster_version
 }
+
+
+output "node_group_name" {
+  description = "EKS managed node group name."
+  value       = module.node_group.node_group_name
+}
+
+output "node_group_status" {
+  description = "EKS managed node group status."
+  value       = module.node_group.status
+}
