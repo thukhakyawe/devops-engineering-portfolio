@@ -89,3 +89,20 @@ module "namespaces" {
     "monitoring"
   ]
 }
+
+# Module application
+
+
+module "application" {
+  source = "./modules/application"
+
+  namespace = "application"
+
+  name = "platform-api"
+
+  image = "nginx:1.27-alpine"
+
+  replicas = 2
+
+  container_port = 80
+}

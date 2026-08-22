@@ -70,3 +70,14 @@ output "kubernetes_namespaces" {
   description = "Kubernetes namespaces managed by Terraform."
   value       = module.namespaces.namespace_names
 }
+
+output "application_deployment" {
+  description = "Application Deployment name."
+  value       = module.application.deployment_name
+}
+
+output "application_service" {
+  description = "Application Service name."
+  value       = module.application.service_name
+}
+
