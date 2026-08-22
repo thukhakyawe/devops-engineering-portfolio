@@ -81,3 +81,7 @@ output "application_service" {
   value       = module.application.service_name
 }
 
+output "aws_load_balancer_controller_role_arn" {
+  description = "IAM role ARN for the AWS Load Balancer Controller."
+  value       = module.aws_load_balancer_controller.role_arn
+}

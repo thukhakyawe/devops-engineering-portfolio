@@ -106,3 +106,15 @@ module "application" {
 
   container_port = 80
 }
+
+# Module aws_load_balancer_controller
+
+module "aws_load_balancer_controller" {
+  source = "./modules/aws-load-balancer-controller"
+
+  name = module.eks.cluster_name
+
+  tags = {
+    Environment = var.environment
+  }
+}
