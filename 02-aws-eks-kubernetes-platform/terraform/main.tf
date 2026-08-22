@@ -77,3 +77,15 @@ module "node_group" {
     Environment = var.environment
   }
 }
+
+# Module namespaces
+
+module "namespaces" {
+  source = "./modules/namespaces"
+
+  namespaces = [
+    "platform",
+    "application",
+    "monitoring"
+  ]
+}

@@ -65,3 +65,8 @@ output "node_group_status" {
   description = "EKS managed node group status."
   value       = module.node_group.status
 }
+
+output "kubernetes_namespaces" {
+  description = "Kubernetes namespaces managed by Terraform."
+  value       = module.namespaces.namespace_names
+}
