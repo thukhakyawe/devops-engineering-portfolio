@@ -45,7 +45,8 @@ module "eks" {
 
   subnet_ids = module.networking.private_subnet_ids
 
-  cluster_role_arn = module.iam.eks_role_arn
+  cluster_role_arn       = module.iam.eks_role_arn
+  node_security_group_id = module.networking.eks_node_security_group_id
 
   tags = {
     Environment = var.environment
@@ -167,8 +168,7 @@ module "external_secrets" {
 module "karpenter" {
   source = "./modules/karpenter"
 
-  cluster_name = module.eks.cluster_name
-
+  cluster_name  = module.eks.cluster_name
   node_role_arn = module.iam.node_role_arn
 
   tags = {

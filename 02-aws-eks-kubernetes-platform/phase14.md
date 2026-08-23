@@ -413,60 +413,753 @@ resource "kubernetes_manifest" "ec2_node_class" {
     }
   }
 
-  depends_on = [
-    helm_release.karpenter
-  ]
 }
 
-However, stop before validating this file.
+Phase 14G.3 — Add Karpenter interruption handling
 
-There is an important dependency we need to address first.
+Create:
 
-Your current VPC/subnet/security-group resources must have the discovery tag:
+terraform/modules/karpenter/interruption.tf
 
-karpenter.sh/discovery = eks-platform-dev
+Put this in it:
 
-Karpenter uses subnet and security-group selector terms to discover where it can launch nodes.
+resource "aws_sqs_queue" "interruption" {
+  name = "${var.cluster_name}-karpenter"
 
-So let's inspect your existing EKS networking before we add the NodePool.
+  message_retention_seconds = 300
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.cluster_name}-karpenter"
+    }
+  )
+}
+
+resource "aws_cloudwatch_event_rule" "spot_interruption" {
+  name        = "${var.cluster_name}-karpenter-spot-interruption"
+  description = "Karpenter Spot interruption events"
+
+  event_pattern = jsonencode({
+    source = [
+      "aws.ec2"
+    ]
+
+    detail-type = [
+      "EC2 Spot Instance Interruption Warning"
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_event_target" "spot_interruption" {
+  rule = aws_cloudwatch_event_rule.spot_interruption.name
+  arn  = aws_sqs_queue.interruption.arn
+}
+
+resource "aws_cloudwatch_event_rule" "rebalance" {
+  name        = "${var.cluster_name}-karpenter-rebalance"
+  description = "Karpenter EC2 rebalance recommendations"
+
+  event_pattern = jsonencode({
+    source = [
+      "aws.ec2"
+    ]
+
+    detail-type = [
+      "EC2 Instance Rebalance Recommendation"
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_event_target" "rebalance" {
+  rule = aws_cloudwatch_event_rule.rebalance.name
+  arn  = aws_sqs_queue.interruption.arn
+}
+
+resource "aws_cloudwatch_event_rule" "instance_state_change" {
+  name        = "${var.cluster_name}-karpenter-instance-state-change"
+  description = "Karpenter EC2 instance state changes"
+
+  event_pattern = jsonencode({
+    source = [
+      "aws.ec2"
+    ]
+
+    detail-type = [
+      "EC2 Instance State-change Notification"
+    ]
+
+    detail = {
+      state = [
+        "stopping",
+        "stopped",
+        "shutting-down",
+        "terminated"
+      ]
+    }
+  })
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_event_target" "instance_state_change" {
+  rule = aws_cloudwatch_event_rule.instance_state_change.name
+  arn  = aws_sqs_queue.interruption.arn
+}
+
+resource "aws_sqs_queue_policy" "interruption" {
+  queue_url = aws_sqs_queue.interruption.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "AllowEventBridgeToSendMessages"
+        Effect = "Allow"
+
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+
+        Action = "sqs:SendMessage"
+
+        Resource = aws_sqs_queue.interruption.arn
+
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = [
+              aws_cloudwatch_event_rule.spot_interruption.arn,
+              aws_cloudwatch_event_rule.rebalance.arn,
+              aws_cloudwatch_event_rule.instance_state_change.arn
+            ]
+          }
+        }
+      }
+    ]
+  })
+}
+
+One important detail
+
+Your helm.tf currently has:
+
+settings.interruptionQueue
+
+pointing to:
+
+"${module.eks.cluster_name}-karpenter"
+
+Our queue is named:
+
+"${var.cluster_name}-karpenter"
+
+and your root module passes:
+
+cluster_name = module.eks.cluster_name
+
+so both resolve to:
+
+eks-platform-dev-karpenter
+
+Therefore they match.
+
+14G.4 — Add the queue dependency
+
+Now open your root Karpenter module in:
+
+terraform/main.tf
+
+Make sure the Karpenter module looks approximately like:
+
+module "karpenter" {
+  source = "./modules/karpenter"
+
+  cluster_name  = module.eks.cluster_name
+  node_role_arn = module.iam.node_role_arn
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+Your existing configuration should already be close to this.
+
+Then make the Helm release explicitly depend on the Karpenter module:
+
+depends_on = [
+  module.eks,
+  module.karpenter
+]
+
+You already have this dependency from the configuration we established, so don't add a duplicate block if it's already there.
+
+14G.5 — Format and validate
 
 Run:
 
-grep -R -n 'karpenter.sh/discovery' terraform/
+terraform -chdir=terraform fmt -recursive
 
-If nothing is returned, that's expected at this stage.
+Then:
+
+terraform -chdir=terraform init
+
+Then:
+
+terraform -chdir=terraform validate
+
+Expected:
+
+Success! The configuration is valid.
+
+Phase 14G.6 — Karpenter networking discovery
+
+Before we create the NodePool, we need to make sure Karpenter can actually discover the AWS resources it is supposed to use.
+
+Your EC2NodeClass currently selects resources using:
+
+"karpenter.sh/discovery" = var.cluster_name
+
+for both subnets and security groups.
+
+We already inspected your networking module earlier, and your private subnets currently have Kubernetes internal-load-balancer tags. We need to add the Karpenter discovery tag to those private subnets.
+
+Edit
+
+Open:
+
+terraform/modules/networking/main.tf
+
+Find:
+
+resource "aws_subnet" "private" {
+
+and its existing tags:
+
+tags = merge(
+  var.tags,
+  {
+    Name                              = "${var.name}-private-${each.key}"
+    Tier                              = "private"
+    "kubernetes.io/role/internal-elb" = "1"
+  }
+)
+
+Change it to:
+
+tags = merge(
+  var.tags,
+  {
+    Name                              = "${var.name}-private-${each.key}"
+    Tier                              = "private"
+    "kubernetes.io/role/internal-elb" = "1"
+    "karpenter.sh/discovery"          = var.name
+  }
+)
+
+Don't change the public subnets. Karpenter should provision worker nodes into the private subnets in this project.
+
+Then run
+terraform -chdir=terraform fmt -recursive
+terraform -chdir=terraform init
+terraform -chdir=terraform validate
+
+Phase 14G.7 — Create the EKS node security group
+
+I recommend creating a dedicated security group in the networking module, because the security group belongs to the VPC/network layer.
+
+Create:
+
+terraform/modules/networking/security-groups.tf
+
+Put this in it:
+
+resource "aws_security_group" "eks_nodes" {
+  name        = "${var.name}-eks-nodes"
+  description = "Security group for EKS worker nodes"
+  vpc_id      = aws_vpc.this.id
+
+  tags = merge(
+    var.tags,
+    {
+      Name                     = "${var.name}-eks-nodes"
+      "karpenter.sh/discovery" = var.name
+    }
+  )
+}
+
+Why this particular tag matters
+
+Your Karpenter EC2NodeClass already searches for:
+
+"karpenter.sh/discovery" = var.cluster_name
+
+Your networking module receives the same project/cluster name through var.name.
+
+Therefore:
+
+Networking var.name
+        │
+        ▼
+eks-platform-dev
+        │
+        ├── private subnet discovery tag
+        │
+        └── node security-group discovery tag
+
+Karpenter can then discover both.
+
+Add an output
+
+Open:
+
+terraform/modules/networking/outputs.tf
+
+Add:
+
+output "eks_node_security_group_id" {
+  description = "Security group ID for EKS worker nodes."
+  value       = aws_security_group.eks_nodes.id
+}
+
+Pass it through to the EKS module
+
+Now we need to make the security group available to the EKS cluster.
+
+Open:
+
+terraform/modules/eks/variables.tf
+
+Add:
+
+variable "node_security_group_id" {
+  description = "Security group ID for EKS worker nodes."
+  type        = string
+}
+
+Then change:
+
+terraform/modules/eks/main.tf
+
+from:
+
+vpc_config {
+  subnet_ids = var.subnet_ids
+}
+
+to:
+
+vpc_config {
+  subnet_ids = var.subnet_ids
+
+  security_group_ids = [
+    var.node_security_group_id
+  ]
+}
+
+Pass the value from root
+
+Open:
+
+terraform/main.tf
+
+Find your:
+
+module "eks" {
+
+Add:
+
+node_security_group_id = module.networking.eks_node_security_group_id
+
+So conceptually:
+
+module "eks" {
+  source = "./modules/eks"
+
+  name               = var.cluster_name
+  cluster_role_arn   = module.iam.eks_role_arn
+  subnet_ids         = module.networking.private_subnet_ids
+  node_security_group_id = module.networking.eks_node_security_group_id
+
+  # existing arguments...
+}
+
+Keep your existing variable names exactly as they are. The snippet above is illustrative because I don't want you to accidentally rename an existing input.
+
+One more important change
+
+Your private subnet discovery tag from the previous step should be:
+
+"karpenter.sh/discovery" = var.name
+
+So we now have:
+
+Private subnet
+└── karpenter.sh/discovery = eks-platform-dev
+
+EKS node security group
+└── karpenter.sh/discovery = eks-platform-dev
+
+And your Karpenter module receives:
+
+cluster_name = eks-platform-dev
+
+Therefore the selectors match.
+
+Then validate
+
+Run:
+
+terraform -chdir=terraform fmt -recursive
+
+then:
+
+terraform -chdir=terraform init
+
+then:
+
+terraform -chdir=terraform validate
+
+Fix kubernetes.tf
+
+Replace the contents of:
+
+terraform/kubernetes.tf
+
+with:
+
+provider "kubernetes" {
+  host = module.eks.cluster_endpoint
+
+  cluster_ca_certificate = base64decode(
+    module.eks.cluster_certificate_authority_data
+  )
+
+  token = data.aws_eks_cluster_auth.this.token
+}
+
+data "aws_eks_cluster_auth" "this" {
+  name = module.eks.cluster_name
+
+  depends_on = [
+    module.eks
+  ]
+}
+
+Important
+
+We're still using:
+
+data "aws_eks_cluster_auth"
+
+because we need an authentication token.
+
+But we're no longer using data.aws_eks_cluster to discover the endpoint and CA.
+
+Those come directly from the Terraform-managed EKS resource.
+
+Fix helm.tf
+
+Change the top of:
+
+terraform/helm.tf
+
+from:
+
+data "aws_eks_cluster" "helm" {
+  name = module.eks.cluster_name
+}
+
+data "aws_eks_cluster_auth" "helm" {
+  name = module.eks.cluster_name
+}
+
+provider "helm" {
+  kubernetes = {
+    host = data.aws_eks_cluster.helm.endpoint
+    cluster_ca_certificate = base64decode(
+      data.aws_eks_cluster.helm.certificate_authority[0].data
+    )
+
+    token = data.aws_eks_cluster_auth.helm.token
+  }
+}
+
+to:
+
+data "aws_eks_cluster_auth" "helm" {
+  name = module.eks.cluster_name
+
+  depends_on = [
+    module.eks
+  ]
+}
+
+provider "helm" {
+  kubernetes = {
+    host = module.eks.cluster_endpoint
+
+    cluster_ca_certificate = base64decode(
+      module.eks.cluster_certificate_authority_data
+    )
+
+    token = data.aws_eks_cluster_auth.helm.token
+  }
+}
+
+Keep your existing:
+
+resource "helm_release" "karpenter" {
+
+below it unchanged.
+
+
+First Deploy these
+
+terraform -chdir=terraform apply -target=module.networking -target=module.iam -target=module.eks -target=module.node_group
+
+
+Next: verify Kubernetes connectivity
+
+Run:
+
+aws eks update-kubeconfig \
+  --region ap-southeast-1 \
+  --name eks-platform-dev
+
+Then:
+
+kubectl get nodes
+
+Then:
+
+kubectl get nodes -o wide
+
+And finally:
+
+kubectl get pods -A
+Expected
+
+kubectl get nodes should show 2 Ready nodes, because we configured:
+
+desired_size = 2
+min_size     = 2
+max_size     = 3
+
+Something like:
+
+NAME                                           STATUS   ROLES    AGE   VERSION
+ip-10-20-x-x.ap-southeast-1.compute.internal Ready    <none>   ...   v1.33.x
+ip-10-20-x-x.ap-southeast-1.compute.internal Ready    <none>   ...   v1.33.x
+
+kubectl get pods -A should show the EKS/system components running.
+
+terraform -chdir=terraform plan
+
+Remove the entire helm_release "external_secrets" block from:
+
+terraform/external-secrets.tf
+
+So terraform/external-secrets.tf should either be empty or be removed entirely.
+
+Your helm.tf should retain both releases:
+
+resource "helm_release" "karpenter" {
+  ...
+}
+
+resource "helm_release" "external_secrets" {
+  name             = "external-secrets"
+  namespace        = "external-secrets"
+  create_namespace = true
+
+  repository = "https://charts.external-secrets.io"
+  chart      = "external-secrets"
+  version    = "0.20.2"
+
+  set = [
+    {
+      name  = "installCRDs"
+      value = "true"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = "external-secrets"
+    }
+  ]
+
+  depends_on = [
+    module.eks,
+    module.external_secrets
+  ]
+}
 
 Then run:
 
-grep -R -n 'aws_subnet\|aws_security_group' terraform/modules/
+terraform -chdir=terraform fmt -recursive
+terraform -chdir=terraform init
+terraform -chdir=terraform validate
 
-Don't add the NodePool yet.
+You should get:
 
-We want to make sure the existing AWS networking has the correct discovery tags first.
+Success! The configuration is valid.
 
-Why we're doing this
+Install External Secrets Operator
 
-The final architecture will be:
+Run:
 
-                    EKS
-                     │
-          ┌──────────┴──────────┐
-          │                     │
-         HPA                Karpenter
-          │                     │
-       Pod scaling          Node scaling
-                                │
-                                ▼
-                           NodePool
-                                │
-                                ▼
-                         EC2NodeClass
-                                │
-                 ┌──────────────┼──────────────┐
-                 ▼              ▼              ▼
-              Subnets      Security Groups   IAM Role
-                 │
-                 ▼
-              EC2 Nodes
+terraform -chdir=terraform apply \
+  -target=helm_release.external_secrets
 
-NodePool defines what capacity Karpenter may provision, while EC2NodeClass defines AWS-specific details about how that capacity is created.
+Approve with:
+
+yes
+
+After it finishes, verify:
+
+kubectl get pods -n external-secrets
+
+Then:
+
+kubectl get crd | grep external-secrets.io
+
+We want to see CRDs including something like:
+
+clustersecretstores.external-secrets.io
+externalsecrets.external-secrets.io
+
+
+We need to remove the dependency from the Helm release to the entire module.karpenter.
+
+In terraform/helm.tf, update with this:
+
+data "aws_eks_cluster_auth" "helm" {
+  name = module.eks.cluster_name
+
+  depends_on = [
+    module.eks
+  ]
+}
+
+provider "helm" {
+  kubernetes = {
+    host = module.eks.cluster_endpoint
+
+    cluster_ca_certificate = base64decode(
+      module.eks.cluster_certificate_authority_data
+    )
+
+    token = data.aws_eks_cluster_auth.helm.token
+  }
+}
+
+resource "helm_release" "karpenter" {
+  name             = "karpenter"
+  namespace        = "karpenter"
+  create_namespace = true
+
+  repository = "oci://public.ecr.aws/karpenter"
+  chart      = "karpenter"
+  version    = "1.12.1"
+
+  set = [
+    {
+      name  = "settings.clusterName"
+      value = module.eks.cluster_name
+    },
+    {
+      name  = "settings.interruptionQueue"
+      value = "${module.eks.cluster_name}-karpenter"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = "karpenter"
+    },
+    {
+      name  = "settings.aws.region"
+      value = var.aws_region
+    }
+  ]
+
+  depends_on = [
+    module.eks
+  ]
+}
+
+resource "helm_release" "external_secrets" {
+  name             = "external-secrets"
+  namespace        = "external-secrets"
+  create_namespace = true
+
+  repository = "https://charts.external-secrets.io"
+  chart      = "external-secrets"
+  version    = "0.20.2"
+
+  set = [
+    {
+      name  = "installCRDs"
+      value = "true"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = "external-secrets"
+    }
+  ]
+
+  depends_on = [
+    module.eks,
+    module.external_secrets
+  ]
+}
+
+Run:
+
+kubectl delete namespace karpenter
+
+Then wait:
+
+kubectl get namespace karpenter
+
+You want:
+
+Error from server (NotFound)
+
+Do not delete the Karpenter CRDs.
+
+Verify:
+
+kubectl get crd | grep karpenter
+
+You should still see:
+
+ec2nodeclasses.karpenter.k8s.aws
+nodeclaims.karpenter.sh
+nodeoverlays.karpenter.sh
+nodepools.karpenter.sh
+
+That is fine.
+
+Install Karpenter
+
+
+terraform -chdir=terraform apply -target=module.karpenter
+
+Approve with:
+
+yes
+
+Then check:
+
+kubectl get pods -n karpenter
+
+And:
+
+kubectl get crd ec2nodeclasses.karpenter.k8s.aws
+
+We specifically need:
+
+ec2nodeclasses.karpenter.k8s.aws

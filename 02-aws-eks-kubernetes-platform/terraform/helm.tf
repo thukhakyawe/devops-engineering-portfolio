@@ -1,17 +1,17 @@
-
-data "aws_eks_cluster" "helm" {
-  name = module.eks.cluster_name
-}
-
 data "aws_eks_cluster_auth" "helm" {
   name = module.eks.cluster_name
+
+  depends_on = [
+    module.eks
+  ]
 }
 
 provider "helm" {
   kubernetes = {
-    host = data.aws_eks_cluster.helm.endpoint
+    host = module.eks.cluster_endpoint
+
     cluster_ca_certificate = base64decode(
-      data.aws_eks_cluster.helm.certificate_authority[0].data
+      module.eks.cluster_certificate_authority_data
     )
 
     token = data.aws_eks_cluster_auth.helm.token
@@ -39,11 +39,40 @@ resource "helm_release" "karpenter" {
     {
       name  = "serviceAccount.name"
       value = "karpenter"
+    },
+    {
+      name  = "settings.aws.region"
+      value = var.aws_region
+    }
+  ]
+
+  depends_on = [
+    module.eks
+  ]
+}
+
+resource "helm_release" "external_secrets" {
+  name             = "external-secrets"
+  namespace        = "external-secrets"
+  create_namespace = true
+
+  repository = "https://charts.external-secrets.io"
+  chart      = "external-secrets"
+  version    = "0.20.2"
+
+  set = [
+    {
+      name  = "installCRDs"
+      value = "true"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = "external-secrets"
     }
   ]
 
   depends_on = [
     module.eks,
-    module.karpenter
+    module.external_secrets
   ]
 }
