@@ -143,4 +143,22 @@ module "application_config" {
   database_host = "postgres.example.internal"
 
   database_port = 5432
+
+  aws_region = var.aws_region
+
+  depends_on = [
+    helm_release.external_secrets
+  ]
+}
+
+# Module external_secrets
+
+module "external_secrets" {
+  source = "./modules/external-secrets"
+
+  name = module.eks.cluster_name
+
+  tags = {
+    Environment = var.environment
+  }
 }

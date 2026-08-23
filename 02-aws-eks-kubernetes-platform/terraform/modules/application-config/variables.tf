@@ -19,3 +19,8 @@ variable "database_port" {
   type        = number
   default     = 5432
 }
+
+variable "aws_region" {
+  description = "AWS region used by Secrets Manager."
+  type        = string
+}
