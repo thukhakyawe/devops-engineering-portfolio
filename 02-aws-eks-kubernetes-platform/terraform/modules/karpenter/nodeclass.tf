@@ -42,7 +42,5 @@ resource "kubernetes_manifest" "ec2_node_class" {
     }
   }
 
-  depends_on = [
-    helm_release.karpenter
-  ]
+
 }

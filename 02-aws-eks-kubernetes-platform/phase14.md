@@ -413,9 +413,6 @@ resource "kubernetes_manifest" "ec2_node_class" {
     }
   }
 
-  depends_on = [
-    helm_release.karpenter
-  ]
 }
 
 However, stop before validating this file.
@@ -470,3 +467,208 @@ The final architecture will be:
               EC2 Nodes
 
 NodePool defines what capacity Karpenter may provision, while EC2NodeClass defines AWS-specific details about how that capacity is created.
+
+
+1. Add the discovery tag to private subnets
+
+In:
+
+terraform/modules/networking/main.tf
+
+change the private subnet tags from:
+
+tags = merge(
+  var.tags,
+  {
+    Name                              = "${var.name}-private-${each.key}"
+    Tier                              = "private"
+    "kubernetes.io/role/internal-elb" = "1"
+  }
+)
+
+to:
+
+tags = merge(
+  var.tags,
+  {
+    Name                              = "${var.name}-private-${each.key}"
+    Tier                              = "private"
+    "kubernetes.io/role/internal-elb" = "1"
+    "karpenter.sh/discovery"          = var.name
+  }
+)
+
+Because your var.name is:
+
+eks-platform-dev
+
+the resulting tag will be:
+
+karpenter.sh/discovery = eks-platform-dev
+
+which matches:
+
+var.cluster_name
+
+in your EC2NodeClass.
+
+
+Fix terraform/kubernetes.tf
+
+Change:
+
+data "aws_eks_cluster" "this" {
+  name = module.eks.cluster_name
+}
+
+data "aws_eks_cluster_auth" "this" {
+  name = module.eks.cluster_name
+}
+
+provider "kubernetes" {
+  host = data.aws_eks_cluster.this.endpoint
+
+  cluster_ca_certificate = base64decode(
+    data.aws_eks_cluster.this.certificate_authority[0].data
+  )
+
+  token = data.aws_eks_cluster_auth.this.token
+}
+
+to:
+
+provider "kubernetes" {
+  host = module.eks.cluster_endpoint
+
+  cluster_ca_certificate = base64decode(
+    module.eks.cluster_certificate_authority_data
+  )
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+
+    command = "aws"
+
+    args = [
+      "eks",
+      "get-token",
+      "--cluster-name",
+      module.eks.cluster_name,
+      "--region",
+      var.aws_region
+    ]
+  }
+}
+
+This removes the failing:
+
+data.aws_eks_cluster.this
+data.aws_eks_cluster_auth.this
+
+lookup.
+
+Do the same in terraform/helm.tf
+
+Your current:
+
+data "aws_eks_cluster" "helm" {
+  name = module.eks.cluster_name
+}
+
+data "aws_eks_cluster_auth" "helm" {
+  name = module.eks.cluster_name
+}
+
+etc
+
+should not be there for this architecture.
+
+Use:
+
+
+provider "helm" {
+  kubernetes = {
+    host = module.eks.cluster_endpoint
+
+    cluster_ca_certificate = base64decode(
+      module.eks.cluster_certificate_authority_data
+    )
+
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+
+      command = "aws"
+
+      args = [
+        "eks",
+        "get-token",
+        "--cluster-name",
+        module.eks.cluster_name,
+        "--region",
+        var.aws_region
+      ]
+    }
+  }
+}
+
+resource "helm_release" "karpenter" {
+  name             = "karpenter"
+  namespace        = "karpenter"
+  create_namespace = true
+
+  repository = "oci://public.ecr.aws/karpenter"
+  chart      = "karpenter"
+  version    = "1.12.1"
+
+  set = [
+    {
+      name  = "settings.clusterName"
+      value = module.eks.cluster_name
+    },
+    {
+      name  = "settings.interruptionQueue"
+      value = "${module.eks.cluster_name}-karpenter"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = "karpenter"
+    }
+  ]
+
+  depends_on = [
+    module.eks,
+    module.karpenter
+  ]
+}
+
+This is much closer to what you want: Terraform can establish the dependency on module.eks from the module outputs instead of trying to query an already-existing cluster during planning.
+
+Add terraform/modules/networking/main.tf
+
+resource "aws_security_group" "eks_nodes" {
+  name        = "${var.name}-eks-nodes"
+  description = "Security group for EKS worker nodes."
+  vpc_id      = aws_vpc.this.id
+
+  tags = merge(
+    var.tags,
+    {
+      Name                         = "${var.name}-eks-nodes"
+      "karpenter.sh/discovery"     = var.name
+    }
+  )
+}
+
+Add this to terraform/modules/networking/outputs.tf
+
+output "eks_nodes_security_group_id" {
+  description = "Security group ID for EKS worker nodes and Karpenter."
+  value       = aws_security_group.eks_nodes.id
+}
+
+Let's establish that EKS + Karpenter Helm + IAM + baseline node group are healthy first. Then we'll add the EC2NodeClass with the dependency expressed from the root module correctly.
+
+mkdir -p /tmp/terraform-k8s-backup
+mv terraform/modules/karpenter/nodeclass.tf /tmp/terraform-k8s-backup/
+terraform -chdir=terraform plan -out=/tmp/phase14-bootstrap.tfplan
+terraform -chdir=terraform apply "/tmp/phase14-bootstrap.tfplan"

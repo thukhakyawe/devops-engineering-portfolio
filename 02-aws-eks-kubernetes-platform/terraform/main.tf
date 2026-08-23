@@ -132,24 +132,7 @@ module "ingress" {
   service_port = 80
 }
 
-# Module application_config
-module "application_config" {
-  source = "./modules/application-config"
 
-  namespace = "application"
-
-  environment = var.environment
-
-  database_host = "postgres.example.internal"
-
-  database_port = 5432
-
-  aws_region = var.aws_region
-
-  depends_on = [
-    helm_release.external_secrets
-  ]
-}
 
 # Module external_secrets
 

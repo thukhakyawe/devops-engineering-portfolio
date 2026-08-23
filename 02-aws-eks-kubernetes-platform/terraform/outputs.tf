@@ -91,11 +91,6 @@ output "application_ingress" {
   value       = module.ingress.ingress_name
 }
 
-output "application_config_map" {
-  description = "Application ConfigMap name."
-  value       = module.application_config.config_map_name
-}
-
 output "external_secrets_role_arn" {
   description = "IAM role ARN for External Secrets Operator."
   value       = module.external_secrets.role_arn

@@ -22,3 +22,8 @@ output "availability_zones" {
   description = "Availability Zones used by the VPC."
   value       = var.availability_zones
 }
+
+output "eks_nodes_security_group_id" {
+  description = "Security group ID for EKS worker nodes and Karpenter."
+  value       = aws_security_group.eks_nodes.id
+}
