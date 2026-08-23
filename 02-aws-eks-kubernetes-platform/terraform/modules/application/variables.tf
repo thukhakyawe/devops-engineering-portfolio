@@ -28,3 +28,21 @@ variable "container_port" {
   type        = number
   default     = 80
 }
+
+variable "min_replicas" {
+  description = "Minimum number of application replicas."
+  type        = number
+  default     = 2
+}
+
+variable "max_replicas" {
+  description = "Maximum number of application replicas."
+  type        = number
+  default     = 5
+}
+
+variable "target_cpu_utilization" {
+  description = "Target average CPU utilization percentage."
+  type        = number
+  default     = 70
+}

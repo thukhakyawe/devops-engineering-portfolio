@@ -8,8 +8,15 @@ resource "kubernetes_deployment" "this" {
     }
   }
 
+  lifecycle {
+    ignore_changes = [
+      spec[0].replicas
+    ]
+  }
+
+
   spec {
-    replicas = var.replicas
+    replicas = var.min_replicas
 
     strategy {
       type = "RollingUpdate"

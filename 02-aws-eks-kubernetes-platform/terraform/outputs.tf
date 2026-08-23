@@ -100,3 +100,8 @@ output "external_secrets_role_arn" {
   description = "IAM role ARN for External Secrets Operator."
   value       = module.external_secrets.role_arn
 }
+
+output "application_hpa_name" {
+  description = "Application Horizontal Pod Autoscaler name."
+  value       = module.application.hpa_name
+}
