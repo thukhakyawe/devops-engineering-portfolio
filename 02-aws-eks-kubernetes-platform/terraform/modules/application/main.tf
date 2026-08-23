@@ -34,6 +34,13 @@ resource "kubernetes_deployment" "this" {
             container_port = var.container_port
           }
 
+          env_from {
+            config_map_ref {
+              name = "platform-api-config"
+            }
+          }
+
+
           resources {
             requests = {
               cpu    = "100m"
@@ -66,10 +73,7 @@ resource "kubernetes_deployment" "this" {
             period_seconds        = 20
           }
 
-          env {
-            name  = "ENVIRONMENT"
-            value = "dev"
-          }
+
         }
       }
     }

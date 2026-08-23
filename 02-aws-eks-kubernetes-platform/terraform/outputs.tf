@@ -90,3 +90,8 @@ output "application_ingress" {
   description = "Kubernetes Ingress name for the application."
   value       = module.ingress.ingress_name
 }
+
+output "application_config_map" {
+  description = "Application ConfigMap name."
+  value       = module.application_config.config_map_name
+}
