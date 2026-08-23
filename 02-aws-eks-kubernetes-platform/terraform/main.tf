@@ -162,3 +162,16 @@ module "external_secrets" {
     Environment = var.environment
   }
 }
+
+# Module karpenter
+module "karpenter" {
+  source = "./modules/karpenter"
+
+  cluster_name = module.eks.cluster_name
+
+  node_role_arn = module.iam.node_role_arn
+
+  tags = {
+    Environment = var.environment
+  }
+}
