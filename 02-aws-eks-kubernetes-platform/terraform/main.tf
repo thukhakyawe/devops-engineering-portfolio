@@ -118,3 +118,16 @@ module "aws_load_balancer_controller" {
     Environment = var.environment
   }
 }
+
+# Module ingress
+module "ingress" {
+  source = "./modules/ingress"
+
+  namespace = "application"
+
+  name = "platform-api"
+
+  service_name = module.application.service_name
+
+  service_port = 80
+}
