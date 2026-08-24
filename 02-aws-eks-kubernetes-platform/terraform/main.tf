@@ -151,9 +151,16 @@ module "external_secrets" {
 
   name = module.eks.cluster_name
 
+  environment = var.environment
+  aws_region  = var.aws_region
+
   tags = {
     Environment = var.environment
   }
+
+  depends_on = [
+    aws_eks_addon.pod_identity_agent
+  ]
 }
 
 # Module karpenter

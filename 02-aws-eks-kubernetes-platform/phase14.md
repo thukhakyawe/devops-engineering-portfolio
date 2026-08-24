@@ -668,12 +668,6 @@ output "eks_nodes_security_group_id" {
 
 Let's establish that EKS + Karpenter Helm + IAM + baseline node group are healthy first. Then we'll add the EC2NodeClass with the dependency expressed from the root module correctly.
 
-# First backup the nodeclass.tf file, then run:
-mkdir -p /tmp/terraform-k8s-backup
-mv terraform/modules/karpenter/nodeclass.tf /tmp/terraform-k8s-backup/
-terraform -chdir=terraform plan -out=/tmp/phase14-bootstrap.tfplan
-terraform -chdir=terraform apply "/tmp/phase14-bootstrap.tfplan"
-
 
 1. Add a variable to modules/application/variables.tf
 
