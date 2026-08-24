@@ -46,3 +46,8 @@ variable "target_cpu_utilization" {
   type        = number
   default     = 70
 }
+
+variable "config_map_name" {
+  description = "Name of the ConfigMap containing application configuration."
+  type        = string
+}

@@ -668,7 +668,106 @@ output "eks_nodes_security_group_id" {
 
 Let's establish that EKS + Karpenter Helm + IAM + baseline node group are healthy first. Then we'll add the EC2NodeClass with the dependency expressed from the root module correctly.
 
+# First backup the nodeclass.tf file, then run:
 mkdir -p /tmp/terraform-k8s-backup
 mv terraform/modules/karpenter/nodeclass.tf /tmp/terraform-k8s-backup/
 terraform -chdir=terraform plan -out=/tmp/phase14-bootstrap.tfplan
 terraform -chdir=terraform apply "/tmp/phase14-bootstrap.tfplan"
+
+
+1. Add a variable to modules/application/variables.tf
+
+Add:
+
+variable "config_map_name" {
+  description = "Name of the ConfigMap containing application configuration."
+  type        = string
+}
+2. Change modules/application/main.tf
+
+Replace:
+
+env_from {
+  config_map_ref {
+    name = "platform-api-config"
+  }
+}
+
+with:
+
+env_from {
+  config_map_ref {
+    name = var.config_map_name
+  }
+}
+3. Add the ConfigMap module in root terraform/main.tf
+
+After module "namespaces":
+
+# Module application-config
+
+module "application_config" {
+  source = "./modules/application-config"
+
+  namespace     = "application"
+  environment   = var.environment
+  database_host = "postgres.application.svc.cluster.local"
+  database_port = 5432
+  aws_region    = var.aws_region
+}
+
+Then update your existing module "application":
+
+module "application" {
+  source = "./modules/application"
+
+  namespace = "application"
+
+  name = "platform-api"
+
+  image = "nginx:1.27-alpine"
+
+  replicas = 2
+
+  container_port = 80
+
+  config_map_name = module.application_config.config_map_name
+}
+
+The important line is:
+
+config_map_name = module.application_config.config_map_name
+
+This does two things:
+
+The application gets the actual ConfigMap name from the configuration module.
+Terraform creates an implicit dependency:
+module.application_config
+          ↓
+   ConfigMap created
+          ↓
+module.application
+          ↓
+   Deployment created
+
+That's much better than hard-coding "platform-api-config" in two different places.
+
+1. Fix terraform/modules/application-config/external-secret.tf
+
+Change:
+
+apiVersion = "external-secrets.io/v1beta1"
+
+to:
+
+apiVersion = "external-secrets.io/v1"
+
+2. Fix terraform/modules/application-config/secret-store.tf
+
+Change:
+
+apiVersion = "external-secrets.io/v1beta1"
+
+to:
+
+apiVersion = "external-secrets.io/v1"

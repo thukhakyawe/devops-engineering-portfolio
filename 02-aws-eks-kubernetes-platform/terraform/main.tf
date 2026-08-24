@@ -90,8 +90,16 @@ module "namespaces" {
   ]
 }
 
-# Module application
+# Module application-config
+module "application_config" {
+  source = "./modules/application-config"
 
+  namespace     = "application"
+  environment   = var.environment
+  database_host = "postgres.application.svc.cluster.local"
+  database_port = 5432
+  aws_region    = var.aws_region
+}
 
 module "application" {
   source = "./modules/application"
@@ -105,6 +113,8 @@ module "application" {
   replicas = 2
 
   container_port = 80
+
+  config_map_name = module.application_config.config_map_name
 }
 
 # Module aws_load_balancer_controller

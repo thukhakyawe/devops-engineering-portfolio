@@ -69,7 +69,7 @@ resource "kubernetes_deployment" "this" {
 
           env_from {
             config_map_ref {
-              name = "platform-api-config"
+              name = var.config_map_name
             }
           }
 
