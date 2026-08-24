@@ -4,14 +4,17 @@ We’ll treat it as a clean implementation from scratch, independent of the brok
 
 We'll keep Phase 14 out of the implementation path.
 
-terraform apply -target=module.networking
-terraform apply -target=module.eks
-terraform apply -target=module.node_group
-terraform apply -target=aws_eks_addon.pod_identity_agent
-terraform apply -target=module.external_secrets
-terraform apply -target=helm_release.external_secrets
-terraform apply -target=module.application_config
-terraform apply -target=module.application
+terraform -chdir=terraform apply -target=module.networking
+terraform -chdir=terraform apply -target=module.eks
+terraform -chdir=terraform apply -target=module.node_group
+terraform -chdir=terraform apply -target=aws_eks_addon.pod_identity_agent
+terraform -chdir=terraform apply -target=module.external_secrets
+terraform -chdir=terraform apply -target=helm_release.external_secrets
+terraform -chdir=terraform apply -target=module.application_config
+terraform -chdir=terraform apply -target=module.application
+terraform -chdir=terraform apply -target=module.aws_load_balancer_controller
+terraform -chdir=terraform apply -target=module.ingress
+terraform -chdir=terraform apply -target=helm_release.metrics_server
 
 STAGE 1
 AWS foundation
@@ -647,3 +650,271 @@ kubectl get pods \
   -l app=platform-api
 kubectl get service -n application
 kubectl get hpa -n application
+
+Stage 5A — Create AWS Load Balancer Controller IAM
+
+Run:
+
+terraform -chdir=terraform apply \
+  -target=module.aws_load_balancer_controller
+
+Approve with:
+
+yes
+
+This should create the AWS-side resources defined in the module:
+
+module.aws_load_balancer_controller
+│
+├── IAM role
+├── IAM policy
+├── IAM policy attachment
+└── EKS Pod Identity association
+
+After it completes
+
+Run:
+
+terraform -chdir=terraform state list | \
+grep 'module.aws_load_balancer_controller'
+
+We should now see resources similar to:
+
+module.aws_load_balancer_controller.aws_iam_role.controller
+module.aws_load_balancer_controller.aws_iam_policy.controller
+module.aws_load_balancer_controller.aws_iam_role_policy_attachment.controller
+module.aws_load_balancer_controller.aws_eks_pod_identity_association.controller
+
+Then verify the IAM role:
+
+terraform -chdir=terraform state show \
+  module.aws_load_balancer_controller.aws_iam_role.controller
+
+And verify the Pod Identity association:
+
+terraform -chdir=terraform state show \
+  module.aws_load_balancer_controller.aws_eks_pod_identity_association.controller
+
+
+Stage 5B — Install AWS Load Balancer Controller
+
+First check whether Terraform already has the Helm release in state:
+
+terraform -chdir=terraform state list | \
+grep 'helm_release.aws_load_balancer_controller'
+
+If that returns nothing, proceed with:
+
+terraform -chdir=terraform plan \
+  -target=helm_release.aws_load_balancer_controller
+
+Review the plan. We expect:
+
+Plan: 1 to add, 0 to change, 0 to destroy
+
+Then:
+
+terraform -chdir=terraform apply \
+  -target=helm_release.aws_load_balancer_controller
+
+Approve with:
+
+yes
+Important
+
+Your Helm configuration has:
+
+serviceAccount.create = "true"
+serviceAccount.name   = "aws-load-balancer-controller"
+
+That's appropriate because the Pod Identity association we created targets:
+
+namespace:       kube-system
+serviceAccount:  aws-load-balancer-controller
+
+Therefore the chain is:
+
+IAM Role
+   │
+   ▼
+EKS Pod Identity Association
+   │
+   │ kube-system/
+   │ aws-load-balancer-controller
+   ▼
+Helm creates ServiceAccount
+   │
+   ▼
+AWS Load Balancer Controller
+
+After the Helm apply
+
+Run:
+
+kubectl get deployment \
+  aws-load-balancer-controller \
+  -n kube-system
+
+Then:
+
+kubectl get pods \
+  -n kube-system \
+  -l app.kubernetes.io/name=aws-load-balancer-controller \
+  -o wide
+
+We want the controller pod(s) to show:
+
+READY   STATUS
+1/1     Running
+
+Then check:
+
+kubectl get serviceaccount \
+  aws-load-balancer-controller \
+  -n kube-system
+
+And finally:
+
+kubectl logs \
+  -n kube-system \
+  deployment/aws-load-balancer-controller \
+  --tail=50
+
+We want no credential/Pod Identity errors.
+
+Stage 5C — Install Ingress
+
+terraform -chdir=terraform apply -target=module.ingress
+
+Run:
+
+kubectl get ingress -n application
+
+Initially you may see:
+
+NAME           CLASS   HOSTS   ADDRESS   PORTS
+platform-api   alb     *                 80
+
+The ADDRESS may take a little while to populate.
+
+Watch it:
+
+kubectl get ingress \
+  -n application \
+  platform-api \
+  -w
+
+Eventually you want something like:
+
+NAME           CLASS   HOSTS   ADDRESS                                             PORTS
+platform-api   alb     *       k8s-application-platforma-xxxxxxxxxx.elb.amazonaws.com   80
+
+Press Ctrl+C once it appears.
+
+Then check TargetGroupBinding
+
+Run:
+
+kubectl get targetgroupbindings -n application
+
+You should now see a TGB created by the AWS Load Balancer Controller.
+
+Then:
+
+kubectl describe targetgroupbinding \
+  -n application \
+  $(kubectl get targetgroupbindings -n application -o jsonpath='{.items[0].metadata.name}')
+
+Check the Ingress events
+
+This is particularly useful if the ALB doesn't appear:
+
+kubectl describe ingress platform-api -n application
+
+Look at the bottom under:
+
+Events:
+
+Successful reconciliation should show events indicating the ALB/load balancer resources are being created.
+
+Then test the ALB
+
+Once the ADDRESS exists:
+
+ALB=$(kubectl get ingress platform-api \
+  -n application \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+echo "$ALB"
+
+Then:
+
+curl -I "http://$ALB/"
+
+Expected:
+
+HTTP/1.1 200 OK
+
+You can also retrieve the actual page:
+
+curl "http://$ALB/"
+
+You should get the nginx welcome page.
+
+aws elbv2 describe-target-health \
+  --target-group-arn arn:aws:elasticloadbalancing:ap-southeast-1:051305442317:targetgroup/k8s-applicat-platform-511f4f0bdf/6f14bb1774002faa \
+  --region ap-southeast-1 \
+  --query 'TargetHealthDescriptions[].{
+    IP:Target.Id,
+    Port:Target.Port,
+    State:TargetHealth.State,
+    Reason:TargetHealth.Reason,
+    Description:TargetHealth.Description
+  }' \
+  --output table
+
+
+You can add Metrics Server as another helm_release using the same Helm provider.
+
+I recommend creating:
+
+terraform/metrics-server.tf
+
+with:
+
+resource "helm_release" "metrics_server" {
+  name             = "metrics-server"
+  namespace        = "kube-system"
+  create_namespace = false
+
+  repository = "https://kubernetes-sigs.github.io/metrics-server/"
+  chart      = "metrics-server"
+
+  depends_on = [
+    module.eks
+  ]
+}
+Then plan it
+
+From your project root:
+
+terraform -chdir=terraform fmt
+
+Then:
+
+terraform -chdir=terraform validate
+
+Then:
+
+terraform -chdir=terraform plan
+
+Then
+
+terraform -chdir=terraform apply -target=helm_release.metrics_server
+
+kubectl get apiservice v1beta1.metrics.k8s.io
+kubectl get deployment metrics-server -n kube-system
+kubectl get pods -n kube-system | grep metrics
+kubectl top pods -n application
+kubectl get hpa -n application
+kubectl describe hpa platform-api-hpa -n application

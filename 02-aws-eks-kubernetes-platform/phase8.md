@@ -244,7 +244,8 @@ data "aws_iam_policy_document" "controller_permissions" {
       "ec2:DescribeTags",
       "ec2:GetCoipPoolUsage",
       "ec2:GetSecurityGroupsForVpc",
-      "ec2:DescribeCoipPools"
+      "ec2:DescribeCoipPools",
+      "ec2:DeleteSecurityGroup",
     ]
 
     resources = ["*"]
@@ -263,7 +264,11 @@ data "aws_iam_policy_document" "controller_permissions" {
       "elasticloadbalancing:DescribeRules",
       "elasticloadbalancing:DescribeTargetGroups",
       "elasticloadbalancing:DescribeTargetHealth",
-      "elasticloadbalancing:DescribeTags"
+      "elasticloadbalancing:DescribeTags",
+      "elasticloadbalancing:DescribeTargetGroupAttributes",
+      "elasticloadbalancing:CreateRule",
+      "elasticloadbalancing:RegisterTargets"
+      
     ]
 
     resources = ["*"]

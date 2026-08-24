@@ -90,6 +90,7 @@ module "namespaces" {
   ]
 }
 
+
 # Module application-config
 module "application_config" {
   source = "./modules/application-config"
@@ -100,6 +101,8 @@ module "application_config" {
   database_port = 5432
   aws_region    = var.aws_region
 }
+
+
 
 module "application" {
   source = "./modules/application"
@@ -163,6 +166,7 @@ module "external_secrets" {
   ]
 }
 
+
 # Module karpenter
 module "karpenter" {
   source = "./modules/karpenter"
@@ -175,3 +179,4 @@ module "karpenter" {
     Environment = var.environment
   }
 }
+

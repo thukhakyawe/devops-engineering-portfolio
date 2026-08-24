@@ -24,6 +24,7 @@ provider "helm" {
   }
 }
 
+
 resource "helm_release" "karpenter" {
   name             = "karpenter"
   namespace        = "karpenter"

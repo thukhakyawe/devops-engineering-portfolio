@@ -101,7 +101,9 @@ output "application_hpa_name" {
   value       = module.application.hpa_name
 }
 
+/*
 output "karpenter_controller_role_arn" {
   description = "Karpenter controller IAM role ARN."
   value       = module.karpenter.controller_role_arn
 }
+*/
