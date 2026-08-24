@@ -14,7 +14,7 @@ variable "name" {
 variable "image" {
   description = "Container image."
   type        = string
-  default     = "nginx:1.27-alpine"
+  default     = "nginxinc/nginx-unprivileged:1.27-alpine"
 }
 
 variable "replicas" {
@@ -26,7 +26,7 @@ variable "replicas" {
 variable "container_port" {
   description = "Application container port."
   type        = number
-  default     = 80
+  default     = 8080
 }
 
 variable "min_replicas" {

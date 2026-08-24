@@ -108,11 +108,11 @@ module "application" {
 
   name = "platform-api"
 
-  image = "nginx:1.27-alpine"
+  image = "nginxinc/nginx-unprivileged:1.27-alpine"
 
   replicas = 2
 
-  container_port = 80
+  container_port = 8080
 
   config_map_name = module.application_config.config_map_name
 }
