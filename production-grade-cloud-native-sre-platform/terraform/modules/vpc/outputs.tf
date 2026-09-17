@@ -22,3 +22,8 @@ output "nat_gateway_id" {
   description = "NAT Gateway ID"
   value       = aws_nat_gateway.this.id
 }
+
+output "private_app_route_table_id" {
+  description = "Private application route table ID"
+  value       = aws_route_table.private_app.id
+}
