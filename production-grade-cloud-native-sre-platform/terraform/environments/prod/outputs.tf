@@ -32,3 +32,15 @@ output "ec2_role_arn" {
   description = "EC2 IAM role ARN"
   value       = module.iam.ec2_role_arn
 }
+
+output "alb_security_group_id" {
+  value = module.security_groups.alb_security_group_id
+}
+
+output "app_security_group_id" {
+  value = module.security_groups.app_security_group_id
+}
+
+output "db_security_group_id" {
+  value = module.security_groups.db_security_group_id
+}
