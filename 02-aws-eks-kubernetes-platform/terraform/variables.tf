@@ -52,3 +52,15 @@ variable "private_subnet_cidrs" {
     "10.20.12.0/24"
   ]
 }
+
+variable "database_username" {
+  description = "Database username for the platform API."
+  type        = string
+  sensitive   = true
+}
+
+variable "database_password" {
+  description = "Database password for the platform API."
+  type        = string
+  sensitive   = true
+}

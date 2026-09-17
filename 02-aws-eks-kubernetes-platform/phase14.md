@@ -1015,6 +1015,7 @@ Run:
 terraform -chdir=terraform apply \
   -target=helm_release.external_secrets
 
+<<<<<<< HEAD
 Approve with:
 
 yes
@@ -1045,6 +1046,128 @@ data "aws_eks_cluster_auth" "helm" {
   ]
 }
 
+=======
+NodePool defines what capacity Karpenter may provision, while EC2NodeClass defines AWS-specific details about how that capacity is created.
+
+
+1. Add the discovery tag to private subnets
+
+In:
+
+terraform/modules/networking/main.tf
+
+change the private subnet tags from:
+
+tags = merge(
+  var.tags,
+  {
+    Name                              = "${var.name}-private-${each.key}"
+    Tier                              = "private"
+    "kubernetes.io/role/internal-elb" = "1"
+  }
+)
+
+to:
+
+tags = merge(
+  var.tags,
+  {
+    Name                              = "${var.name}-private-${each.key}"
+    Tier                              = "private"
+    "kubernetes.io/role/internal-elb" = "1"
+    "karpenter.sh/discovery"          = var.name
+  }
+)
+
+Because your var.name is:
+
+eks-platform-dev
+
+the resulting tag will be:
+
+karpenter.sh/discovery = eks-platform-dev
+
+which matches:
+
+var.cluster_name
+
+in your EC2NodeClass.
+
+
+Fix terraform/kubernetes.tf
+
+Change:
+
+data "aws_eks_cluster" "this" {
+  name = module.eks.cluster_name
+}
+
+data "aws_eks_cluster_auth" "this" {
+  name = module.eks.cluster_name
+}
+
+provider "kubernetes" {
+  host = data.aws_eks_cluster.this.endpoint
+
+  cluster_ca_certificate = base64decode(
+    data.aws_eks_cluster.this.certificate_authority[0].data
+  )
+
+  token = data.aws_eks_cluster_auth.this.token
+}
+
+to:
+
+provider "kubernetes" {
+  host = module.eks.cluster_endpoint
+
+  cluster_ca_certificate = base64decode(
+    module.eks.cluster_certificate_authority_data
+  )
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+
+    command = "aws"
+
+    args = [
+      "eks",
+      "get-token",
+      "--cluster-name",
+      module.eks.cluster_name,
+      "--region",
+      var.aws_region
+    ]
+  }
+}
+
+This removes the failing:
+
+data.aws_eks_cluster.this
+data.aws_eks_cluster_auth.this
+
+lookup.
+
+Do the same in terraform/helm.tf
+
+Your current:
+
+data "aws_eks_cluster" "helm" {
+  name = module.eks.cluster_name
+}
+
+data "aws_eks_cluster_auth" "helm" {
+  name = module.eks.cluster_name
+}
+
+etc
+
+should not be there for this architecture.
+
+Use:
+
+
+>>>>>>> phase-14
 provider "helm" {
   kubernetes = {
     host = module.eks.cluster_endpoint
@@ -1053,7 +1176,24 @@ provider "helm" {
       module.eks.cluster_certificate_authority_data
     )
 
+<<<<<<< HEAD
     token = data.aws_eks_cluster_auth.helm.token
+=======
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+
+      command = "aws"
+
+      args = [
+        "eks",
+        "get-token",
+        "--cluster-name",
+        module.eks.cluster_name,
+        "--region",
+        var.aws_region
+      ]
+    }
+>>>>>>> phase-14
   }
 }
 
@@ -1078,6 +1218,7 @@ resource "helm_release" "karpenter" {
     {
       name  = "serviceAccount.name"
       value = "karpenter"
+<<<<<<< HEAD
     },
     {
       name  = "settings.aws.region"
@@ -1107,11 +1248,14 @@ resource "helm_release" "external_secrets" {
     {
       name  = "serviceAccount.name"
       value = "external-secrets"
+=======
+>>>>>>> phase-14
     }
   ]
 
   depends_on = [
     module.eks,
+<<<<<<< HEAD
     module.external_secrets
   ]
 }
@@ -1163,3 +1307,133 @@ kubectl get crd ec2nodeclasses.karpenter.k8s.aws
 We specifically need:
 
 ec2nodeclasses.karpenter.k8s.aws
+=======
+    module.karpenter
+  ]
+}
+
+This is much closer to what you want: Terraform can establish the dependency on module.eks from the module outputs instead of trying to query an already-existing cluster during planning.
+
+Add terraform/modules/networking/main.tf
+
+resource "aws_security_group" "eks_nodes" {
+  name        = "${var.name}-eks-nodes"
+  description = "Security group for EKS worker nodes."
+  vpc_id      = aws_vpc.this.id
+
+  tags = merge(
+    var.tags,
+    {
+      Name                         = "${var.name}-eks-nodes"
+      "karpenter.sh/discovery"     = var.name
+    }
+  )
+}
+
+Add this to terraform/modules/networking/outputs.tf
+
+output "eks_nodes_security_group_id" {
+  description = "Security group ID for EKS worker nodes and Karpenter."
+  value       = aws_security_group.eks_nodes.id
+}
+
+Let's establish that EKS + Karpenter Helm + IAM + baseline node group are healthy first. Then we'll add the EC2NodeClass with the dependency expressed from the root module correctly.
+
+
+1. Add a variable to modules/application/variables.tf
+
+Add:
+
+variable "config_map_name" {
+  description = "Name of the ConfigMap containing application configuration."
+  type        = string
+}
+2. Change modules/application/main.tf
+
+Replace:
+
+env_from {
+  config_map_ref {
+    name = "platform-api-config"
+  }
+}
+
+with:
+
+env_from {
+  config_map_ref {
+    name = var.config_map_name
+  }
+}
+3. Add the ConfigMap module in root terraform/main.tf
+
+After module "namespaces":
+
+# Module application-config
+
+module "application_config" {
+  source = "./modules/application-config"
+
+  namespace     = "application"
+  environment   = var.environment
+  database_host = "postgres.application.svc.cluster.local"
+  database_port = 5432
+  aws_region    = var.aws_region
+}
+
+Then update your existing module "application":
+
+module "application" {
+  source = "./modules/application"
+
+  namespace = "application"
+
+  name = "platform-api"
+
+  image = "nginx:1.27-alpine"
+
+  replicas = 2
+
+  container_port = 80
+
+  config_map_name = module.application_config.config_map_name
+}
+
+The important line is:
+
+config_map_name = module.application_config.config_map_name
+
+This does two things:
+
+The application gets the actual ConfigMap name from the configuration module.
+Terraform creates an implicit dependency:
+module.application_config
+          ↓
+   ConfigMap created
+          ↓
+module.application
+          ↓
+   Deployment created
+
+That's much better than hard-coding "platform-api-config" in two different places.
+
+1. Fix terraform/modules/application-config/external-secret.tf
+
+Change:
+
+apiVersion = "external-secrets.io/v1beta1"
+
+to:
+
+apiVersion = "external-secrets.io/v1"
+
+2. Fix terraform/modules/application-config/secret-store.tf
+
+Change:
+
+apiVersion = "external-secrets.io/v1beta1"
+
+to:
+
+apiVersion = "external-secrets.io/v1"
+>>>>>>> phase-14

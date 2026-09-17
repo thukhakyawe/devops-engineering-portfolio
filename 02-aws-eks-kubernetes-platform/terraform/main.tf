@@ -91,7 +91,18 @@ module "namespaces" {
   ]
 }
 
-# Module application
+
+# Module application-config
+module "application_config" {
+  source = "./modules/application-config"
+
+  namespace     = "application"
+  environment   = var.environment
+  database_host = "postgres.application.svc.cluster.local"
+  database_port = 5432
+  aws_region    = var.aws_region
+}
+
 
 
 module "application" {
@@ -101,11 +112,13 @@ module "application" {
 
   name = "platform-api"
 
-  image = "nginx:1.27-alpine"
+  image = "nginxinc/nginx-unprivileged:1.27-alpine"
 
   replicas = 2
 
-  container_port = 80
+  container_port = 8080
+
+  config_map_name = module.application_config.config_map_name
 }
 
 # Module aws_load_balancer_controller
@@ -133,24 +146,7 @@ module "ingress" {
   service_port = 80
 }
 
-# Module application_config
-module "application_config" {
-  source = "./modules/application-config"
 
-  namespace = "application"
-
-  environment = var.environment
-
-  database_host = "postgres.example.internal"
-
-  database_port = 5432
-
-  aws_region = var.aws_region
-
-  depends_on = [
-    helm_release.external_secrets
-  ]
-}
 
 # Module external_secrets
 
@@ -159,10 +155,18 @@ module "external_secrets" {
 
   name = module.eks.cluster_name
 
+  environment = var.environment
+  aws_region  = var.aws_region
+
   tags = {
     Environment = var.environment
   }
+
+  depends_on = [
+    aws_eks_addon.pod_identity_agent
+  ]
 }
+
 
 # Module karpenter
 module "karpenter" {
@@ -175,3 +179,4 @@ module "karpenter" {
     Environment = var.environment
   }
 }
+

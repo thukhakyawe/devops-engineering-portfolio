@@ -14,7 +14,7 @@ variable "name" {
 variable "image" {
   description = "Container image."
   type        = string
-  default     = "nginx:1.27-alpine"
+  default     = "nginxinc/nginx-unprivileged:1.27-alpine"
 }
 
 variable "replicas" {
@@ -26,7 +26,7 @@ variable "replicas" {
 variable "container_port" {
   description = "Application container port."
   type        = number
-  default     = 80
+  default     = 8080
 }
 
 variable "min_replicas" {
@@ -45,4 +45,9 @@ variable "target_cpu_utilization" {
   description = "Target average CPU utilization percentage."
   type        = number
   default     = 70
+}
+
+variable "config_map_name" {
+  description = "Name of the ConfigMap containing application configuration."
+  type        = string
 }

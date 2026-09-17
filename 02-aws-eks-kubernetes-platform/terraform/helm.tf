@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 data "aws_eks_cluster_auth" "helm" {
   name = module.eks.cluster_name
 
@@ -5,6 +6,8 @@ data "aws_eks_cluster_auth" "helm" {
     module.eks
   ]
 }
+=======
+>>>>>>> phase-14
 
 provider "helm" {
   kubernetes = {
@@ -14,9 +17,23 @@ provider "helm" {
       module.eks.cluster_certificate_authority_data
     )
 
-    token = data.aws_eks_cluster_auth.helm.token
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+
+      command = "aws"
+
+      args = [
+        "eks",
+        "get-token",
+        "--cluster-name",
+        module.eks.cluster_name,
+        "--region",
+        var.aws_region
+      ]
+    }
   }
 }
+
 
 resource "helm_release" "karpenter" {
   name             = "karpenter"

@@ -14,7 +14,6 @@ resource "kubernetes_deployment" "this" {
     ]
   }
 
-
   spec {
     replicas = var.min_replicas
 
@@ -69,8 +68,23 @@ resource "kubernetes_deployment" "this" {
 
           env_from {
             config_map_ref {
-              name = "platform-api-config"
+              name = var.config_map_name
             }
+          }
+
+          volume_mount {
+            name       = "nginx-cache"
+            mount_path = "/var/cache/nginx"
+          }
+
+          volume_mount {
+            name       = "nginx-run"
+            mount_path = "/var/run"
+          }
+
+          volume_mount {
+            name       = "tmp"
+            mount_path = "/tmp"
           }
 
           resources {
@@ -120,6 +134,24 @@ resource "kubernetes_deployment" "this" {
             failure_threshold     = 3
             success_threshold     = 1
           }
+        }
+
+        volume {
+          name = "nginx-cache"
+
+          empty_dir {}
+        }
+
+        volume {
+          name = "nginx-run"
+
+          empty_dir {}
+        }
+
+        volume {
+          name = "tmp"
+
+          empty_dir {}
         }
       }
     }

@@ -43,7 +43,7 @@ resource "aws_iam_policy" "external_secrets" {
           "secretsmanager:DescribeSecret"
         ]
 
-        Resource = "arn:aws:secretsmanager:*:*:secret:${var.name}/*"
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:${var.environment}/platform-api/*"
       }
     ]
   })

@@ -42,4 +42,8 @@ resource "kubernetes_manifest" "ec2_node_class" {
     }
   }
 
+<<<<<<< HEAD:02-aws-eks-kubernetes-platform/terraform/modules/karpenter/nodeclass.tf
+=======
+
+>>>>>>> phase-14:02-aws-eks-kubernetes-platform/terraform/modules/karpenter/nodeclass.tf.disabled
 }

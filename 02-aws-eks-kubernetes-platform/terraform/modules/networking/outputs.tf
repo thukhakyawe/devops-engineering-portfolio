@@ -23,7 +23,14 @@ output "availability_zones" {
   value       = var.availability_zones
 }
 
+<<<<<<< HEAD
 output "eks_node_security_group_id" {
   description = "Security group ID for EKS worker nodes."
   value       = aws_security_group.eks_nodes.id
 }
+=======
+output "eks_nodes_security_group_id" {
+  description = "Security group ID for EKS worker nodes and Karpenter."
+  value       = aws_security_group.eks_nodes.id
+}
+>>>>>>> phase-14
