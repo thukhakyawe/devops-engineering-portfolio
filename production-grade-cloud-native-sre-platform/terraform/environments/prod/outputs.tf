@@ -48,3 +48,19 @@ output "db_security_group_id" {
 output "private_app_route_table_id" {
   value = module.vpc.private_app_route_table_id
 }
+
+output "rds_instance_id" {
+  value = module.rds.db_instance_id
+}
+
+output "rds_endpoint" {
+  value = module.rds.db_endpoint
+}
+
+output "rds_port" {
+  value = module.rds.db_port
+}
+
+output "rds_subnet_group_name" {
+  value = module.rds.db_subnet_group_name
+}
